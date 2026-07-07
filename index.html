@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#121212">
+<title>Emet Editor</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root{
+    --bg:#121212; --panel:#1c1c24; --panel2:#26262f; --line:rgba(255,255,255,0.10);
+    --text:#f2f2f5; --muted:#9aa0b4; --accent:#007BFF; --accent2:#28a745; --danger:#FF4C4C;
+    --editor-bg:#1a1a20; --editor-fg:#f2f2f5;
+  }
+  html[data-theme="light"]{
+    --bg:#eceef2; --panel:#ffffff; --panel2:#f2f3f6; --line:rgba(0,0,0,0.12);
+    --text:#15171c; --muted:#5b6070; --editor-bg:#ffffff; --editor-fg:#15171c;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:'Segoe UI',system-ui,-apple-system,Roboto,'Arial Hebrew',sans-serif;
+    overscroll-behavior:none;}
+  body{display:flex;flex-direction:column;height:100vh;height:100dvh;}
+
+  /* header */
+  header{flex:none;display:flex;align-items:center;gap:8px;padding:8px 10px;
+    padding-top:calc(8px + env(safe-area-inset-top));background:var(--panel);border-bottom:1px solid var(--line);}
+  header h1{font-size:16px;margin:0;font-weight:800;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header h1 .bolt{color:#FFBF00;}
+  .ibtn{background:var(--panel2);border:none;color:var(--text);min-width:38px;height:38px;
+    padding:0 8px;border-radius:9px;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;
+    transition:transform .08s,background .15s;}
+  .ibtn:active{transform:scale(.9);background:var(--accent);}
+
+  /* tab strip */
+  .tabs{flex:none;display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--panel);
+    border-bottom:1px solid var(--line);overflow-x:auto;overflow-y:hidden;scrollbar-width:none;}
+  .tabs::-webkit-scrollbar{display:none;}
+  .tab{flex:none;display:flex;align-items:center;gap:6px;max-width:150px;padding:7px 10px;border-radius:9px;
+    background:var(--panel2);color:var(--muted);font-size:13px;font-weight:700;border:1px solid transparent;}
+  .tab.active{background:var(--accent);color:#fff;}
+  .tab .tname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px;}
+  .tab .tx{opacity:.7;font-size:15px;line-height:1;}
+  .tab-add{flex:none;width:34px;height:34px;border-radius:9px;background:var(--panel2);border:none;
+    color:var(--text);font-size:20px;display:flex;align-items:center;justify-content:center;}
+  .tab-add:active{transform:scale(.9);}
+
+  /* formatting toolbar */
+  .toolbar{flex:none;display:flex;align-items:center;gap:4px;padding:6px 8px;background:var(--panel2);
+    border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none;}
+  .toolbar::-webkit-scrollbar{display:none;}
+  .tb{flex:none;min-width:38px;height:38px;padding:0 9px;border-radius:8px;border:none;background:transparent;
+    color:var(--text);font-size:15px;display:flex;align-items:center;justify-content:center;font-weight:700;}
+  .tb:active{transform:scale(.9);}
+  .tb.on{background:var(--accent);color:#fff;}
+  .tb .u{text-decoration:underline;} .tb .i{font-style:italic;} .tb .s{text-decoration:line-through;}
+  .tb-sep{flex:none;width:1px;height:24px;background:var(--line);margin:0 2px;}
+  .swatch-dot{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.5);}
+
+  /* editor */
+  .editor-wrap{flex:1;overflow:auto;background:var(--editor-bg);}
+  .editor{min-height:100%;padding:14px 16px calc(40vh);outline:none;color:var(--editor-fg);
+    font-size:var(--efs,17px);line-height:1.55;-webkit-user-select:text;user-select:text;}
+  .editor:empty::before{content:attr(data-ph);color:var(--muted);}
+  .editor img{max-width:100%;height:auto;border-radius:6px;}
+  .editor table{border-collapse:collapse;margin:8px 0;}
+  .editor td,.editor th{border:1px solid var(--muted);padding:6px 10px;min-width:40px;}
+  .editor ul,.editor ol{padding-inline-start:26px;}
+  .editor a{color:var(--accent);}
+
+  /* status bar */
+  .status{flex:none;display:flex;align-items:center;gap:12px;padding:6px 12px;
+    padding-bottom:calc(6px + env(safe-area-inset-bottom));
+    background:var(--panel);border-top:1px solid var(--line);font-size:12px;color:var(--muted);}
+  .status .sp{margin-inline-start:auto;}
+
+  /* find bar */
+  .findbar{flex:none;display:none;gap:6px;padding:8px;background:var(--panel2);border-bottom:1px solid var(--line);
+    flex-wrap:wrap;align-items:center;}
+  .findbar.open{display:flex;}
+  .findbar input{flex:1;min-width:110px;background:var(--bg);border:1px solid var(--line);border-radius:8px;
+    color:var(--text);padding:9px 10px;font-size:14px;}
+  .findbar button{flex:none;height:36px;padding:0 12px;border:none;border-radius:8px;background:var(--accent);
+    color:#fff;font-weight:700;font-size:13px;}
+  .findbar button.ghost{background:var(--panel);color:var(--text);border:1px solid var(--line);}
+
+  /* generic bottom sheet */
+  .sheet-wrap{position:fixed;inset:0;z-index:60;display:none;}
+  .sheet-wrap.open{display:block;}
+  .backdrop{position:absolute;inset:0;background:rgba(0,0,0,.55);}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--panel);border-radius:20px 20px 0 0;
+    padding:18px 18px calc(20px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto;
+    animation:slideup .22s cubic-bezier(.2,.8,.2,1);}
+  @keyframes slideup{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  .sheet h2{margin:2px 0 14px;font-size:18px;}
+  .menu-item{display:flex;align-items:center;gap:12px;padding:14px 6px;font-size:15px;font-weight:600;
+    border-bottom:1px solid var(--line);}
+  .menu-item:last-child{border-bottom:none;}
+  .menu-item .mi-ic{width:24px;text-align:center;font-size:17px;}
+  .menu-item.danger{color:var(--danger);}
+  .btn{width:100%;padding:13px;border:none;border-radius:11px;font-size:15px;font-weight:800;color:#fff;
+    background:var(--accent);margin-top:10px;}
+  .btn.ghost{background:var(--panel2);color:var(--text);}
+  .btn:active{transform:scale(.98);}
+  .field{margin-bottom:12px;}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;}
+  .field input[type=text]{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:12px;font-size:15px;}
+  html[dir="rtl"] .field label{letter-spacing:normal;text-transform:none;}
+  .swatches{display:flex;gap:10px;flex-wrap:wrap;}
+  .sw{width:34px;height:34px;border-radius:50%;border:2px solid rgba(128,128,128,.4);}
+  .sw.sel{border-color:var(--text);transform:scale(1.12);}
+  input[type=file]{display:none;}
+  .field input[type=time]{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:12px;font-size:15px;font-family:inherit;}
+  .btn.danger{background:var(--danger);}
+
+  /* chips (attachments / audio notes) inside the editor */
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;padding:3px 9px;margin:0 2px;font-size:14px;color:var(--text);vertical-align:middle;
+    -webkit-user-select:none;user-select:none;}
+  .chip.audio{color:var(--accent);font-weight:700;}
+  .editor .bm{scroll-margin-top:16px;}
+
+  /* list rows in sheets (bookmarks / snippets / reminders) */
+  .lrow{display:flex;align-items:center;gap:10px;padding:12px 6px;border-bottom:1px solid var(--line);font-size:14px;}
+  .lrow:last-child{border-bottom:none;}
+  .lrow .lbody{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .lrow .lx{margin-inline-start:auto;color:var(--danger);font-size:19px;padding:2px 8px;flex:none;}
+  .lrow .ldot{width:12px;height:12px;border-radius:50%;flex:none;}
+  .lrow .lsub{color:var(--muted);font-size:12px;}
+  .empty2{color:var(--muted);font-size:13px;text-align:center;padding:16px 0;font-style:italic;}
+  .row2{display:flex;gap:10px;}
+  .row2>*{flex:1;}
+
+  .toast{position:fixed;left:50%;bottom:calc(70px + env(safe-area-inset-bottom));transform:translateX(-50%);
+    background:#000;color:#fff;border:1px solid var(--line);padding:10px 18px;border-radius:22px;font-size:14px;
+    font-weight:600;z-index:90;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap;}
+  .toast.show{opacity:1;}
+  .hidden{display:none!important;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="bolt">&#9889;</span> <span data-i18n="appTitle">Emet Editor</span></h1>
+  <button class="ibtn" id="btnFind" title="Find">&#128269;</button>
+  <button class="ibtn" id="btnLang">&#1506;&#1489;</button>
+  <button class="ibtn" id="btnTheme" title="Theme">&#9789;</button>
+  <button class="ibtn" id="btnMenu" title="Menu">&#9776;</button>
+</header>
+
+<div class="tabs" id="tabStrip"></div>
+
+<div class="toolbar" id="toolbar">
+  <button class="tb" data-cmd="bold" title="Bold"><b>B</b></button>
+  <button class="tb" data-cmd="italic" title="Italic"><span class="i">I</span></button>
+  <button class="tb" data-cmd="underline" title="Underline"><span class="u">U</span></button>
+  <button class="tb" data-cmd="strikeThrough" title="Strikethrough"><span class="s">S</span></button>
+  <span class="tb-sep"></span>
+  <button class="tb" id="tbTextColor" title="Text color"><span class="swatch-dot" style="background:#FF4C4C"></span></button>
+  <button class="tb" id="tbHiliteColor" title="Highlight"><span class="swatch-dot" style="background:#FFEB3B"></span></button>
+  <span class="tb-sep"></span>
+  <button class="tb" data-size="down" title="Smaller">A&#8595;</button>
+  <button class="tb" data-size="up" title="Bigger">A&#8593;</button>
+  <span class="tb-sep"></span>
+  <button class="tb" data-cmd="insertUnorderedList" title="Bullets">&#8226;&#8801;</button>
+  <button class="tb" data-cmd="insertOrderedList" title="Numbered">1.&#8801;</button>
+  <span class="tb-sep"></span>
+  <button class="tb" data-cmd="justifyRight" title="Align right">&#8614;</button>
+  <button class="tb" data-cmd="justifyCenter" title="Center">&#8596;</button>
+  <button class="tb" data-cmd="justifyLeft" title="Align left">&#8612;</button>
+  <span class="tb-sep"></span>
+  <button class="tb" id="tbInsert" title="Insert">&#43;&#128196;</button>
+  <button class="tb" id="tbBookmark" title="Bookmark">&#128278;</button>
+  <span class="tb-sep"></span>
+  <button class="tb" id="tbDir" title="Text direction">&#8596;A</button>
+  <button class="tb" data-cmd="removeFormat" title="Clear formatting">&#10005;F</button>
+</div>
+
+<div class="findbar" id="findbar">
+  <input type="text" id="findInput" data-i18n-ph="ph_find" placeholder="Find...">
+  <input type="text" id="replaceInput" data-i18n-ph="ph_replace" placeholder="Replace with...">
+  <button id="findNext" data-i18n="find_next">Next</button>
+  <button id="replaceOne" class="ghost" data-i18n="replace">Replace</button>
+  <button id="replaceAll" class="ghost" data-i18n="replace_all">All</button>
+  <button id="findClose" class="ghost">&#10005;</button>
+</div>
+
+<div class="editor-wrap" id="editorWrap">
+  <div class="editor" id="editor" contenteditable="true" spellcheck="false" data-ph="Start typing..."></div>
+</div>
+
+<div class="status">
+  <span id="stWords">0 words</span>
+  <span id="stChars">0 chars</span>
+  <span class="sp" id="stSaved">saved</span>
+</div>
+
+<!-- Menu sheet -->
+<div class="sheet-wrap" id="menuWrap">
+  <div class="backdrop" data-close></div>
+  <div class="sheet">
+    <h2 data-i18n="menu">Menu</h2>
+    <div class="menu-item" id="miNav"><span class="mi-ic">&#128278;</span><span data-i18n="navigation">Bookmarks / Navigation</span></div>
+    <div class="menu-item" id="miSnippets"><span class="mi-ic">&#9776;</span><span data-i18n="snippets">Snippets</span></div>
+    <div class="menu-item" id="miReminders"><span class="mi-ic">&#9200;</span><span data-i18n="reminders">Reminders</span></div>
+    <div class="menu-item" id="miExportHtml"><span class="mi-ic">&#128196;</span><span data-i18n="export_html">Export this tab (.html)</span></div>
+    <div class="menu-item" id="miExportTxt"><span class="mi-ic">&#128209;</span><span data-i18n="export_txt">Export this tab (.txt)</span></div>
+    <div class="menu-item" id="miBackup"><span class="mi-ic">&#128190;</span><span data-i18n="backup">Back up all tabs</span></div>
+    <div class="menu-item" id="miRestore"><span class="mi-ic">&#128194;</span><span data-i18n="restore">Restore from backup</span></div>
+    <div class="menu-item danger" id="miDeleteTab"><span class="mi-ic">&#128465;</span><span data-i18n="delete_tab">Delete current tab</span></div>
+    <input type="file" id="restoreFile" accept=".json,application/json">
+  </div>
+</div>
+
+<!-- Rename sheet -->
+<div class="sheet-wrap" id="renameWrap">
+  <div class="backdrop" data-close></div>
+  <div class="sheet">
+    <h2 data-i18n="rename_tab">Rename tab</h2>
+    <div class="field"><label data-i18n="tab_name">Name</label><input type="text" id="renameInput" autocomplete="off"></div>
+    <button class="btn" id="renameSave" data-i18n="save">Save</button>
+  </div>
+</div>
+
+<!-- Color sheet (shared: text / highlight) -->
+<div class="sheet-wrap" id="colorWrap">
+  <div class="backdrop" data-close></div>
+  <div class="sheet">
+    <h2 id="colorTitle">Color</h2>
+    <div class="swatches" id="colorSwatches"></div>
+  </div>
+</div>
+
+<!-- Insert sheet -->
+<div class="sheet-wrap" id="insertWrap">
+  <div class="backdrop" data-close></div>
+  <div class="sheet">
+    <h2 data-i18n="insert">Insert</h2>
+    <div class="menu-item" id="insTable"><span class="mi-ic">&#9638;</span><span data-i18n="ins_table">Table</span></div>
+    <div class="menu-item" id="insImage"><span class="mi-ic">&#128247;</span><span data-i18n="ins_image">Image</span></div>
+    <div class="menu-item" id="insFile"><span class="mi-ic">&#128206;</span><span data-i18n="ins_file">File attachment</span></div>
+    <div class="menu-item" id="insAudio"><span class="mi-ic">&#127908;</span><span data-i18n="ins_audio">Audio note</span></div>
+    <input type="file" id="imageFile" accept="image/*">
+    <input type="file" id="attachFile">
+  </div>
+</div>
+
+<!-- Table sheet -->
+<div class="sheet-wrap" id="tableWrap">
+  <div class="backdrop" data-close></div>
+  <div class="sheet">
+    <h2 data-i18n="ins_table">Table</h2>
+    <div class="row2">
+      <div class="field"><label data-i18n="rows">Rows</label><input type="text" id="tblRows" inputmode="numeric" value="2"></div>
+      <div class="field"><label data-i18n="cols">Columns</label><input type="text" id="tblCols" inputmode="numeric" value="2"></div>
+    </div>
+    <button class="btn" id="tblInsert" data-i18n="insert">Insert</button>
+  </div>
+</div>
+
+<!-- Bookmark color sheet -->
+<div class="sheet-wrap" id="bookmarkWrap">
+  <div class="backdrop" data-close></div>
+  <div class="sheet">
+    <h2 data-i18n="bookmark">Bookmark this line</h2>
+    <div class="swatches" id="bmSwatches"></div>
+    <button class="btn ghost" id="bmRemove" data-i18n="bm_remove">Remove bookmark</button>
+  </div>
+</div>
+
+<!-- Navigation sheet -->
+<div class="sheet-wrap" id="navWrap">
+  <div class="backdrop" data-close></div>
+  <div class="sheet">
+    <h2 data-i18n="navigation">Bookmarks / Navigation</h2>
+    <div id="navList"></div>
+  </div>
+</div>
+
+<!-- Snippets sheet -->
+<div class="sheet-wrap" id="snippetsWrap">
+  <div class="backdrop" data-close></div>
+  <div class="sheet">
+    <h2 data-i18n="snippets">Snippets</h2>
+    <button class="btn" id="snipSave" data-i18n="snip_save">Save selection as snippet</button>
+    <div id="snipList" style="margin-top:12px;"></div>
+  </div>
+</div>
+
+<!-- Reminders sheet -->
+<div class="sheet-wrap" id="remindersWrap">
+  <div class="backdrop" data-close></div>
+  <div class="sheet">
+    <h2 data-i18n="reminders">Reminders</h2>
+    <button class="btn" id="remAdd" data-i18n="rem_add">Add reminder</button>
+    <div id="remList" style="margin-top:12px;"></div>
+  </div>
+</div>
+
+<!-- Reminder editor sheet -->
+<div class="sheet-wrap" id="reminderEditWrap">
+  <div class="backdrop" data-close></div>
+  <div class="sheet">
+    <h2 id="remEditTitle" data-i18n="rem_add">Add reminder</h2>
+    <div class="field"><label data-i18n="rem_title">Title</label><input type="text" id="remTitle" autocomplete="off"></div>
+    <div class="field"><label data-i18n="rem_time">Time</label><input type="time" id="remTime"></div>
+    <div class="field"><label data-i18n="rem_color">Color</label><div class="swatches" id="remSwatches"></div></div>
+    <button class="btn" id="remSave" data-i18n="save">Save</button>
+  </div>
+</div>
+
+<!-- Audio note sheet -->
+<div class="sheet-wrap" id="audioWrap">
+  <div class="backdrop" data-close></div>
+  <div class="sheet">
+    <h2 data-i18n="ins_audio">Audio note</h2>
+    <div style="text-align:center;padding:8px 0;">
+      <div id="audioTimer" style="font-size:34px;font-weight:800;">0:00</div>
+      <div id="audioState" style="color:var(--muted);font-size:13px;margin-top:4px;" data-i18n="tap_record">Tap to record</div>
+    </div>
+    <audio id="audioPreview" controls style="width:100%;margin:6px 0;display:none;"></audio>
+    <button class="btn danger" id="audioRec" data-i18n="rec_start">Start recording</button>
+    <button class="btn" id="audioInsert" data-i18n="rec_insert" style="display:none;">Insert into note</button>
+  </div>
+</div>
+
+<!-- Image options sheet -->
+<div class="sheet-wrap" id="imageOptWrap">
+  <div class="backdrop" data-close></div>
+  <div class="sheet">
+    <h2 data-i18n="image_opts">Image</h2>
+    <div class="menu-item" data-imgw="30%"><span class="mi-ic">S</span><span data-i18n="img_small">Small</span></div>
+    <div class="menu-item" data-imgw="60%"><span class="mi-ic">M</span><span data-i18n="img_medium">Medium</span></div>
+    <div class="menu-item" data-imgw="100%"><span class="mi-ic">L</span><span data-i18n="img_full">Full width</span></div>
+    <div class="menu-item danger" id="imgDelete"><span class="mi-ic">&#128465;</span><span data-i18n="img_delete">Delete image</span></div>
+  </div>
+</div>
+
+<audio id="chipPlayer" style="display:none;"></audio>
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
