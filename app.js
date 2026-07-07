@@ -11,7 +11,7 @@ const K = {
 
 /* ---------- translations ---------- */
 const I18N = {
-  en:{ langLabel:'עב', appTitle:'Emet Editor', menu:'Menu',
+  en:{ langLabel:'עב', appTitle:'Emet Notes', menu:'Menu',
     navigation:'Bookmarks / Navigation', snippets:'Snippets', reminders:'Reminders',
     export_html:'Export this tab (.html)', export_txt:'Export this tab (.txt)',
     backup:'Back up everything', restore:'Restore from backup', delete_tab:'Delete current tab',
@@ -36,7 +36,7 @@ const I18N = {
     image_opts:'Image', img_small:'Small', img_medium:'Medium', img_full:'Full width', img_delete:'Delete image',
     table_added:'Table inserted', image_added:'Image added', file_added:'File attached', audio_added:'Audio note added',
     open:'Open' },
-  he:{ langLabel:'EN', appTitle:'עורך אמת', menu:'תפריט',
+  he:{ langLabel:'EN', appTitle:'פתקי אמת', menu:'תפריט',
     navigation:'סימניות / ניווט', snippets:'קטעים שמורים', reminders:'תזכורות',
     export_html:'ייצא לשונית זו (‎.html)', export_txt:'ייצא לשונית זו (‎.txt)',
     backup:'גבה הכל', restore:'שחזר מגיבוי', delete_tab:'מחק לשונית נוכחית',
@@ -470,7 +470,7 @@ async function backupAll(){
   const assets=await allAssets(); const enc={};
   for(const id in assets){ enc[id]=await blobToDataURL(assets[id]); }
   const payload={ v:2, tabs, snippets, reminders, assets:enc };
-  download(`Emet_Editor_Backup_${stamp()}.json`, JSON.stringify(payload), 'application/json');
+  download(`Emet_Notes_Backup_${stamp()}.json`, JSON.stringify(payload), 'application/json');
   toast(t('backed_up')); closeSheet('menuWrap');
 }
 function restoreFrom(file){

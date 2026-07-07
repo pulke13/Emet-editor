@@ -1,7 +1,7 @@
 {
-  "name": "Emet Editor",
-  "short_name": "Emet Editor",
-  "description": "Compact rich-text editor with tabs, formatting, Hebrew/RTL, find & replace.",
+  "name": "Emet Notes",
+  "short_name": "Emet Notes",
+  "description": "Compact notes editor with tabs, formatting, Hebrew/RTL, find & replace.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

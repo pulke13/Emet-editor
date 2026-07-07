@@ -1,5 +1,5 @@
-EMET EDITOR - phone version (PWA)
-=================================
+EMET NOTES - phone version (PWA)
+================================
 
 The Android/phone version of your Windows compact text editor.
 A "web app" you install to your home screen; works offline; no build credits needed.
