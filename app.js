@@ -35,7 +35,11 @@ const I18N = {
     mic_denied:'Microphone not available',
     image_opts:'Image', img_small:'Small', img_medium:'Medium', img_full:'Full width', img_delete:'Delete image',
     table_added:'Table inserted', image_added:'Image added', file_added:'File attached', audio_added:'Audio note added',
-    open:'Open' },
+    open:'Open',
+    import_win:'Import Windows backup (.zip)',
+    win_confirm:'Import notes, reminders and files from this Windows backup? They will be ADDED to what is already here.',
+    win_done:'Imported', win_notes:'notes', win_rems:'reminders', win_files:'files',
+    win_nothing:'Nothing recognizable found in this zip', win_audio_tab:'Audio recordings (imported)' },
   he:{ langLabel:'EN', appTitle:'פתקי אמת', menu:'תפריט',
     navigation:'סימניות / ניווט', snippets:'קטעים שמורים', reminders:'תזכורות',
     export_html:'ייצא לשונית זו (‎.html)', export_txt:'ייצא לשונית זו (‎.txt)',
@@ -60,7 +64,11 @@ const I18N = {
     mic_denied:'המיקרופון אינו זמין',
     image_opts:'תמונה', img_small:'קטנה', img_medium:'בינונית', img_full:'רוחב מלא', img_delete:'מחק תמונה',
     table_added:'הטבלה נוספה', image_added:'התמונה נוספה', file_added:'הקובץ צורף', audio_added:'ההקלטה נוספה',
-    open:'פתח' }
+    open:'פתח',
+    import_win:'ייבוא גיבוי מ-Windows (‎.zip)',
+    win_confirm:'לייבא פתקים, תזכורות וקבצים מהגיבוי של Windows? הם יתווספו למה שכבר קיים כאן.',
+    win_done:'יובאו', win_notes:'פתקים', win_rems:'תזכורות', win_files:'קבצים',
+    win_nothing:'לא נמצא תוכן מוכר בקובץ ה-zip', win_audio_tab:'הקלטות (מיובא)' }
 };
 let lang = localStorage.getItem(K.lang) || 'en';
 function t(k){ return (I18N[lang]&&I18N[lang][k]) || I18N.en[k] || k; }
@@ -492,6 +500,138 @@ function restoreFrom(file){
 function blobToDataURL(blob){ return new Promise(res=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(blob); }); }
 async function dataURLtoBlob(u){ return (await fetch(u)).blob(); }
 
+/* ---------- import a Windows-app backup ZIP ---------- */
+/* Minimal ZIP reader: walks the central directory, inflates entries with
+   DecompressionStream. Handles methods 0 (stored) and 8 (deflate). */
+async function readZip(file){
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const dv = new DataView(buf.buffer);
+  // find End-Of-Central-Directory record (sig 0x06054b50), scanning back
+  let eocd=-1;
+  for(let i=buf.length-22; i>=Math.max(0,buf.length-70000); i--){
+    if(dv.getUint32(i,true)===0x06054b50){ eocd=i; break; }
+  }
+  if(eocd<0) throw new Error('not a zip');
+  const count = dv.getUint16(eocd+10,true);
+  let off = dv.getUint32(eocd+16,true);
+  const entries={};
+  const td=new TextDecoder();
+  for(let n=0;n<count;n++){
+    if(dv.getUint32(off,true)!==0x02014b50) break;
+    const method = dv.getUint16(off+10,true);
+    const csize  = dv.getUint32(off+20,true);
+    const nlen   = dv.getUint16(off+28,true);
+    const elen   = dv.getUint16(off+30,true);
+    const clen   = dv.getUint16(off+32,true);
+    const lho    = dv.getUint32(off+42,true);
+    const name   = td.decode(buf.subarray(off+46, off+46+nlen));
+    // local header: skip its own name/extra lengths
+    const lnlen = dv.getUint16(lho+26,true);
+    const lelen = dv.getUint16(lho+28,true);
+    const dataStart = lho+30+lnlen+lelen;
+    entries[name] = { method, data: buf.subarray(dataStart, dataStart+csize) };
+    off += 46+nlen+elen+clen;
+  }
+  return {
+    names: Object.keys(entries),
+    async get(name){
+      const e=entries[name]; if(!e) return null;
+      if(e.method===0) return new Blob([e.data]);
+      const ds=new DecompressionStream('deflate-raw');
+      return await new Response(new Blob([e.data]).stream().pipeThrough(ds)).blob();
+    }
+  };
+}
+
+const WIN_AUDIO_EXTS = /\.(mp3|wav|ogg|m4a|flac|aac|webm)$/i;
+
+function qtHtmlToBody(html){
+  // Qt saves a full HTML document; keep only what's inside <body>
+  try{
+    const doc = new DOMParser().parseFromString(html,'text/html');
+    return doc.body ? doc.body.innerHTML : html;
+  }catch(e){ return html; }
+}
+
+async function importWinZip(file){
+  if(!confirm(t('win_confirm'))) return;
+  let zip;
+  try{ zip = await readZip(file); }
+  catch(e){ toast(t('badfile')); return; }
+
+  let nNotes=0, nRems=0, nFiles=0;
+  const td=new TextDecoder();
+
+  // 1) bring every attachment / recording into the app's storage
+  const assetByPath={};   // zip path -> asset id
+  for(const name of zip.names){
+    if(/^(attachments|audio_recordings)\//.test(name) && !name.endsWith('/')){
+      const blob = await zip.get(name);
+      if(!blob || !blob.size) continue;
+      const id=uid(); await putAsset(id, blob);
+      assetByPath[name]=id; nFiles++;
+    }
+  }
+
+  // 2) notes (Windows "memory" snippets) -> tabs
+  const snipBlob = await zip.get('emet_notes_snippets.json');
+  if(snipBlob){
+    try{
+      const raw = JSON.parse(td.decode(new Uint8Array(await snipBlob.arrayBuffer())));
+      const list = Array.isArray(raw) ? raw : (raw.snippets||[]);
+      for(const sn of list){
+        let html = sn.text||'';
+        if(/<html/i.test(html)) html = qtHtmlToBody(html);
+        else html = esc(html).replace(/\n/g,'<br>');
+        // rewrite Windows attachment links into this app's chips
+        html = html.replace(/<a\b[^>]*href="emetattach:([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (m, rel, inner)=>{
+          const id = assetByPath[rel];
+          if(!id) return inner;                       // file missing from zip: keep the text
+          const nice = (rel.split('/').pop()||'file').replace(/^[0-9a-f]{8}_/i,'');
+          if(WIN_AUDIO_EXTS.test(rel))
+            return `<span class="chip audio" contenteditable="false" data-asset="${id}">&#9654; ${esc(nice)}</span>`;
+          return `<span class="chip file" contenteditable="false" data-asset="${id}" data-name="${esc(nice)}">&#128206; ${esc(nice)}</span>`;
+        });
+        const isHe = /[֐-׿]/.test(html);
+        tabs.push({ id:uid(), name:sn.label||t('ph_untitled'), html, dir:isHe?'rtl':'ltr' });
+        nNotes++;
+      }
+    }catch(e){}
+  }
+
+  // 3) loose audio recordings not referenced by any note -> one collector tab
+  const usedIds = new Set(Object.values(assetByPath).filter(id=> tabs.some(tb=> (tb.html||'').includes(id))));
+  const loose = Object.entries(assetByPath).filter(([p,id])=> p.startsWith('audio_recordings/') && !usedIds.has(id));
+  if(loose.length){
+    const chips = loose.map(([p,id])=>{
+      const nice=(p.split('/').pop()||'audio').replace(/^[0-9a-f]{8}_/i,'');
+      return `<div><span class="chip audio" contenteditable="false" data-asset="${id}">&#9654; ${esc(nice)}</span></div>`;
+    }).join('');
+    tabs.push({ id:uid(), name:t('win_audio_tab'), html:chips, dir: lang==='he'?'rtl':'ltr' });
+  }
+
+  // 4) reminders -> daily time reminders
+  const remBlob = await zip.get('emet_notes_reminders.json');
+  if(remBlob){
+    try{
+      const raw = JSON.parse(td.decode(new Uint8Array(await remBlob.arrayBuffer())));
+      if(Array.isArray(raw)) for(const r of raw){
+        const mTime=/T(\d{2}:\d{2})/.exec(r.trigger_time||'');
+        reminders.push({ id:uid(), title:r.title||t('ph_untitled'),
+          time:mTime?mTime[1]:'', color:r.color||'#007BFF', firedOn:'' });
+        nRems++;
+      }
+    }catch(e){}
+  }
+
+  if(!nNotes && !nRems && !nFiles){ toast(t('win_nothing')); return; }
+  saveRems(); persist();
+  if(nNotes) activeId = tabs[tabs.length-1].id;
+  renderTabs(); await loadActiveIntoEditor();
+  closeSheet('menuWrap');
+  toast(`${t('win_done')}: ${nNotes} ${t('win_notes')}, ${nRems} ${t('win_rems')}, ${nFiles} ${t('win_files')}`);
+}
+
 /* ---------- status / helpers ---------- */
 function updateStatus(){
   const txt=editor.innerText.trim(); const words=txt?txt.split(/\s+/).length:0;
@@ -558,6 +698,8 @@ document.getElementById('miExportTxt').addEventListener('click', exportTxt);
 document.getElementById('miBackup').addEventListener('click', backupAll);
 document.getElementById('miRestore').addEventListener('click', ()=> document.getElementById('restoreFile').click());
 document.getElementById('restoreFile').addEventListener('change', e=>{ if(e.target.files[0]) restoreFrom(e.target.files[0]); });
+document.getElementById('miImportWin').addEventListener('click', ()=> document.getElementById('winZipFile').click());
+document.getElementById('winZipFile').addEventListener('change', e=>{ if(e.target.files[0]) importWinZip(e.target.files[0]); e.target.value=''; });
 document.getElementById('miDeleteTab').addEventListener('click', ()=>{ closeSheet('menuWrap'); closeTab(activeId); });
 
 document.querySelectorAll('[data-close]').forEach(el=> el.addEventListener('click', ()=>{
