@@ -137,8 +137,40 @@ function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(
 function activeTab(){ return tabs.find(x=>x.id===activeId) || tabs[0]; }
 
 /* ---------- elements ---------- */
-const editor   = document.getElementById('editor');
-const tabStrip = document.getElementById('tabStrip');
+const editor     = document.getElementById('editor');
+const editorWrap = document.getElementById('editorWrap');
+const tabStrip   = document.getElementById('tabStrip');
+
+/* ---------- pinch zoom (two fingers) ----------
+   Zooms the note itself, not the page. Uses CSS zoom (reflows, so a
+   zoomed-out wide table fits the screen); falls back to transform scale. */
+let curZoom = 1;
+function applyZoom(z){
+  curZoom = Math.max(0.4, Math.min(3, z));
+  if('zoom' in editor.style){
+    editor.style.zoom = curZoom; editor.style.transform=''; editor.style.width='';
+  } else {
+    editor.style.transformOrigin = (editor.getAttribute('dir')==='rtl') ? '100% 0' : '0 0';
+    editor.style.transform = `scale(${curZoom})`;
+    editor.style.width = (100/curZoom)+'%';
+  }
+}
+function _tdist(t){ return Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY); }
+let pinch=null;
+editorWrap.addEventListener('touchstart', e=>{
+  if(e.touches.length===2) pinch={ d0:_tdist(e.touches), z0:curZoom };
+}, {passive:true});
+editorWrap.addEventListener('touchmove', e=>{
+  if(pinch && e.touches.length===2){ e.preventDefault(); applyZoom(pinch.z0 * _tdist(e.touches)/pinch.d0); }
+}, {passive:false});
+editorWrap.addEventListener('touchend', e=>{
+  if(pinch && e.touches.length<2){
+    pinch=null;
+    const tb=activeTab(); if(tb){ tb.zoom=curZoom; persist(); }
+    toast(Math.round(curZoom*100)+'%');
+  }
+});
+editorWrap.addEventListener('touchcancel', ()=>{ pinch=null; });
 
 /* ---------- language & theme ---------- */
 function applyLang(){
@@ -178,6 +210,7 @@ async function loadActiveIntoEditor(){
   editor.innerHTML = tb.html||'';
   editor.setAttribute('dir', tb.dir||'ltr');
   editor.style.textAlign = (tb.dir==='rtl')?'right':'left';
+  applyZoom(tb.zoom||1);
   await resolveAssets();
   updateStatus();
 }
@@ -237,7 +270,8 @@ function refreshToolbarState(){
 function changeFontSize(delta){ fontSize=Math.max(12,Math.min(34,fontSize+delta));
   document.documentElement.style.setProperty('--efs', fontSize+'px'); localStorage.setItem(K.fs,fontSize); }
 function toggleDir(){ const tb=activeTab(); const next=(editor.getAttribute('dir')==='rtl')?'ltr':'rtl';
-  editor.setAttribute('dir',next); editor.style.textAlign=next==='rtl'?'right':'left'; tb.dir=next; persist(); }
+  editor.setAttribute('dir',next); editor.style.textAlign=next==='rtl'?'right':'left'; tb.dir=next;
+  applyZoom(curZoom); persist(); }
 function autoDetectDir(){ const tb=activeTab(); if(tb._dirLocked) return;
   if(/[֐-׿]/.test(editor.innerText||'') && editor.getAttribute('dir')!=='rtl'){
     editor.setAttribute('dir','rtl'); editor.style.textAlign='right'; tb.dir='rtl'; } }

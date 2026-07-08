@@ -65,7 +65,9 @@
     font-size:var(--efs,17px);line-height:1.55;-webkit-user-select:text;user-select:text;}
   .editor:empty::before{content:attr(data-ph);color:var(--muted);}
   .editor img{max-width:100%;height:auto;border-radius:6px;}
-  .editor table{border-collapse:collapse;margin:8px 0;}
+  /* Tables keep their authored column order even in RTL notes (browsers
+     mirror table columns under dir=rtl; the Windows app never did). */
+  .editor table{border-collapse:collapse;margin:8px 0;direction:ltr;}
   .editor td,.editor th{border:1px solid var(--muted);padding:6px 10px;min-width:40px;}
   .editor ul,.editor ol{padding-inline-start:26px;}
   .editor a{color:var(--accent);}
