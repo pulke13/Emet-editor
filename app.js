@@ -39,7 +39,8 @@ const I18N = {
     import_win:'Import Windows backup (.zip)',
     win_confirm:'Import notes, reminders and files from this Windows backup? They will be ADDED to what is already here.',
     win_done:'Imported', win_notes:'notes', win_rems:'reminders', win_files:'files',
-    win_nothing:'Nothing recognizable found in this zip', win_audio_tab:'Audio recordings (imported)' },
+    win_nothing:'No notes/reminders found - is this the User Data zip (not App Settings)?',
+    win_audio_tab:'Audio recordings (imported)', win_importing:'Importing...' },
   he:{ langLabel:'EN', appTitle:'פתקי אמת', menu:'תפריט',
     navigation:'סימניות / ניווט', snippets:'קטעים שמורים', reminders:'תזכורות',
     export_html:'ייצא לשונית זו (‎.html)', export_txt:'ייצא לשונית זו (‎.txt)',
@@ -68,7 +69,8 @@ const I18N = {
     import_win:'ייבוא גיבוי מ-Windows (‎.zip)',
     win_confirm:'לייבא פתקים, תזכורות וקבצים מהגיבוי של Windows? הם יתווספו למה שכבר קיים כאן.',
     win_done:'יובאו', win_notes:'פתקים', win_rems:'תזכורות', win_files:'קבצים',
-    win_nothing:'לא נמצא תוכן מוכר בקובץ ה-zip', win_audio_tab:'הקלטות (מיובא)' }
+    win_nothing:'לא נמצאו פתקים/תזכורות - האם זה קובץ ה-User Data (ולא App Settings)?',
+    win_audio_tab:'הקלטות (מיובא)', win_importing:'מייבא...' }
 };
 let lang = localStorage.getItem(K.lang) || 'en';
 function t(k){ return (I18N[lang]&&I18N[lang][k]) || I18N.en[k] || k; }
@@ -526,10 +528,12 @@ async function readZip(file){
     const lho    = dv.getUint32(off+42,true);
     const name   = td.decode(buf.subarray(off+46, off+46+nlen));
     // local header: skip its own name/extra lengths
-    const lnlen = dv.getUint16(lho+26,true);
-    const lelen = dv.getUint16(lho+28,true);
-    const dataStart = lho+30+lnlen+lelen;
-    entries[name] = { method, data: buf.subarray(dataStart, dataStart+csize) };
+    if(dv.getUint32(lho,true)===0x04034b50 && (method===0 || method===8)){
+      const lnlen = dv.getUint16(lho+26,true);
+      const lelen = dv.getUint16(lho+28,true);
+      const dataStart = lho+30+lnlen+lelen;
+      entries[name] = { method, data: buf.subarray(dataStart, dataStart+csize) };
+    }
     off += 46+nlen+elen+clen;
   }
   return {
@@ -537,6 +541,8 @@ async function readZip(file){
     async get(name){
       const e=entries[name]; if(!e) return null;
       if(e.method===0) return new Blob([e.data]);
+      if(typeof DecompressionStream==='undefined')
+        throw new Error('This browser cannot unpack zip files (no DecompressionStream)');
       const ds=new DecompressionStream('deflate-raw');
       return await new Response(new Blob([e.data]).stream().pipeThrough(ds)).blob();
     }
@@ -555,9 +561,16 @@ function qtHtmlToBody(html){
 
 async function importWinZip(file){
   if(!confirm(t('win_confirm'))) return;
-  let zip;
-  try{ zip = await readZip(file); }
-  catch(e){ toast(t('badfile')); return; }
+  toast(t('win_importing'));
+  try{ await _importWinZipInner(file); }
+  catch(e){
+    // never fail silently: show exactly what broke so it can be reported
+    alert('Import failed:\n' + (e && e.message ? e.message : e));
+  }
+}
+
+async function _importWinZipInner(file){
+  const zip = await readZip(file);
 
   let nNotes=0, nRems=0, nFiles=0;
   const td=new TextDecoder();
@@ -566,10 +579,12 @@ async function importWinZip(file){
   const assetByPath={};   // zip path -> asset id
   for(const name of zip.names){
     if(/^(attachments|audio_recordings)\//.test(name) && !name.endsWith('/')){
-      const blob = await zip.get(name);
-      if(!blob || !blob.size) continue;
-      const id=uid(); await putAsset(id, blob);
-      assetByPath[name]=id; nFiles++;
+      try{
+        const blob = await zip.get(name);
+        if(!blob || !blob.size) continue;
+        const id=uid(); await putAsset(id, blob);
+        assetByPath[name]=id; nFiles++;
+      }catch(e){ /* one bad file must not sink the rest */ }
     }
   }
 
