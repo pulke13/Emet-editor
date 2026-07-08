@@ -1,5 +1,5 @@
 /* Offline cache so the editor opens with no internet and installs as a PWA. */
-const CACHE = 'emet-editor-v5';
+const CACHE = 'emet-editor-v6';
 const ASSETS = [
   './','./index.html','./app.js','./manifest.webmanifest',
   './icon.svg','./icon-192.png','./icon-512.png'

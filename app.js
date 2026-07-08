@@ -80,35 +80,59 @@ const HILITE_COLORS = ['transparent','#FFEB3B','#7CFC00','#00E5FF','#FF80AB','#F
 const BM_COLORS = ['#FF4C4C','#FFBF00','#28a745','#007BFF','#a855f7'];
 const REM_COLORS = ['#007BFF','#FF4C4C','#28a745','#FFBF00','#a855f7'];
 
-/* ---------- IndexedDB (binary assets) ---------- */
+/* ---------- IndexedDB (binary assets + all note content) ---------- */
 let _db=null;
 function db(){
   return _db ? Promise.resolve(_db) : new Promise((res,rej)=>{
-    const r = indexedDB.open('emet_editor', 1);
-    r.onupgradeneeded = ()=> r.result.createObjectStore('assets');
+    const r = indexedDB.open('emet_editor', 2);
+    r.onupgradeneeded = ()=>{
+      const d=r.result;
+      if(!d.objectStoreNames.contains('assets')) d.createObjectStore('assets');
+      if(!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
+    };
     r.onsuccess = ()=>{ _db=r.result; res(_db); };
     r.onerror = ()=> rej(r.error);
   });
 }
+async function kvSet(key,val){ const d=await db(); return new Promise((res,rej)=>{ const tx=d.transaction('kv','readwrite'); tx.objectStore('kv').put(val,key); tx.oncomplete=res; tx.onerror=()=>rej(tx.error); }); }
+async function kvGet(key){ const d=await db(); return new Promise((res)=>{ const tx=d.transaction('kv','readonly'); const rq=tx.objectStore('kv').get(key); rq.onsuccess=()=>res(rq.result); rq.onerror=()=>res(undefined); }); }
 async function putAsset(id, blob){ const d=await db(); return new Promise((res,rej)=>{ const tx=d.transaction('assets','readwrite'); tx.objectStore('assets').put(blob,id); tx.oncomplete=res; tx.onerror=()=>rej(tx.error); }); }
 async function getAsset(id){ const d=await db(); return new Promise((res)=>{ const tx=d.transaction('assets','readonly'); const rq=tx.objectStore('assets').get(id); rq.onsuccess=()=>res(rq.result||null); rq.onerror=()=>res(null); }); }
 async function allAssets(){ const d=await db(); return new Promise((res)=>{ const tx=d.transaction('assets','readonly'); const st=tx.objectStore('assets'); const out={}; const cur=st.openCursor(); cur.onsuccess=e=>{ const c=e.target.result; if(c){ out[c.key]=c.value; c.continue(); } else res(out); }; cur.onerror=()=>res(out); }); }
 
-/* ---------- data ---------- */
-let tabs = load();
+/* ---------- data ----------
+   Notes, snippets and reminders live in IndexedDB, which can hold hundreds of
+   MB. localStorage (~5MB cap) only keeps tiny prefs. Earlier versions kept
+   everything in localStorage and big imports overflowed it, so anything found
+   there is migrated over once on startup. */
+let tabs = [{ id:uid(), name:'', html:'', dir:'ltr' }];
+let snippets = [];
+let reminders = [];
 let activeId = localStorage.getItem(K.active);
 let fontSize = parseInt(localStorage.getItem(K.fs)) || 17;
-let snippets = loadJSON(K.snips, []);
-let reminders = loadJSON(K.rems, []);
 
-function load(){
-  try{ const a=JSON.parse(localStorage.getItem(K.tabs)); if(Array.isArray(a)&&a.length) return a; }catch(e){}
-  return [{ id:uid(), name:'', html:'', dir:'ltr' }];
+async function initData(){
+  async function loadOrMigrate(kvKey, lsKey){
+    let v = await kvGet(kvKey);
+    if(v===undefined || v===null){
+      try{
+        const ls = JSON.parse(localStorage.getItem(lsKey));
+        if(ls){ v=ls; await kvSet(kvKey, ls); localStorage.removeItem(lsKey); }
+      }catch(e){}
+    }
+    return v;
+  }
+  const tb = await loadOrMigrate('tabs', K.tabs);
+  if(Array.isArray(tb) && tb.length) tabs = tb;
+  snippets  = (await loadOrMigrate('snippets', K.snips)) || [];
+  reminders = (await loadOrMigrate('reminders', K.rems)) || [];
 }
-function loadJSON(key, def){ try{ return JSON.parse(localStorage.getItem(key))||def; }catch(e){ return def; } }
-function persist(){ localStorage.setItem(K.tabs, JSON.stringify(tabs)); localStorage.setItem(K.active, activeId); }
-function saveSnips(){ localStorage.setItem(K.snips, JSON.stringify(snippets)); }
-function saveRems(){ localStorage.setItem(K.rems, JSON.stringify(reminders)); }
+function persist(){
+  localStorage.setItem(K.active, activeId);
+  return kvSet('tabs', tabs).catch(e=> alert('Save failed:\n'+(e&&e.message?e.message:e)));
+}
+function saveSnips(){ return kvSet('snippets', snippets).catch(()=>{}); }
+function saveRems(){ return kvSet('reminders', reminders).catch(()=>{}); }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function activeTab(){ return tabs.find(x=>x.id===activeId) || tabs[0]; }
 
@@ -495,7 +519,7 @@ function restoreFrom(file){
       snippets = data.snippets||[]; reminders = data.reminders||[]; saveSnips(); saveRems();
       if(data.assets){ for(const id in data.assets){ await putAsset(id, await dataURLtoBlob(data.assets[id])); } }
     }
-    activeId=tabs[0].id; persist(); renderTabs(); await loadActiveIntoEditor(); closeSheet('menuWrap'); toast(t('restored'));
+    activeId=tabs[0].id; await persist(); renderTabs(); await loadActiveIntoEditor(); closeSheet('menuWrap'); toast(t('restored'));
   }catch(e){ toast(t('badfile')); } };
   rd.readAsText(file);
 }
@@ -640,7 +664,7 @@ async function _importWinZipInner(file){
   }
 
   if(!nNotes && !nRems && !nFiles){ toast(t('win_nothing')); return; }
-  saveRems(); persist();
+  await saveRems(); await persist();
   if(nNotes) activeId = tabs[tabs.length-1].id;
   renderTabs(); await loadActiveIntoEditor();
   closeSheet('menuWrap');
@@ -721,7 +745,11 @@ document.querySelectorAll('[data-close]').forEach(el=> el.addEventListener('clic
   ['menuWrap','renameWrap','colorWrap','insertWrap','tableWrap','bookmarkWrap','navWrap','snippetsWrap','remindersWrap','reminderEditWrap','audioWrap','imageOptWrap'].forEach(closeSheet); }));
 
 /* ---------- init ---------- */
-if(!activeId || !tabs.find(x=>x.id===activeId)) activeId=tabs[0].id;
-applyTheme(); changeFontSize(0); applyLang(); loadActiveIntoEditor(); persist();
-setInterval(checkAlarms, 15000); checkAlarms();
-if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+(async function start(){
+  applyTheme(); changeFontSize(0);
+  await initData();
+  if(!activeId || !tabs.find(x=>x.id===activeId)) activeId=tabs[0].id;
+  applyLang(); await loadActiveIntoEditor(); persist();
+  setInterval(checkAlarms, 15000); checkAlarms();
+  if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+})();
